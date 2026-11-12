@@ -20,15 +20,17 @@ If you'd rather not run a compiled file from the internet, or your company doesn
 
 ## Download
 
-Open the [latest pre-release](https://github.com/grahamfairbank/sonos-analyzer/releases) and, under **Assets**, download the file for your computer:
+Pilot version 0.4.0 beta 1. Select the file for your computer to download it:
 
-| Computer | File |
+| Computer | Download |
 |---|---|
-| Windows 10 or 11 | `SonosAnalyzer-<version>-windows-x64.exe` |
-| Mac with Apple silicon (M1 or later) | `SonosAnalyzer-<version>-macos-apple-silicon.zip` |
-| Mac with an Intel processor | `SonosAnalyzer-<version>-macos-intel.zip` |
+| Windows 10 or 11 | [SonosAnalyzer-0.4.0-beta.1-windows-x64.exe](https://github.com/grahamfairbank/sonos-analyzer/releases/download/v0.4.0-beta.1/SonosAnalyzer-0.4.0-beta.1-windows-x64.exe) (about 10 MB) |
+| Mac with Apple silicon (M1 or later) | [SonosAnalyzer-0.4.0-beta.1-macos-apple-silicon.zip](https://github.com/grahamfairbank/sonos-analyzer/releases/download/v0.4.0-beta.1/SonosAnalyzer-0.4.0-beta.1-macos-apple-silicon.zip) |
+| Mac with an Intel processor | [SonosAnalyzer-0.4.0-beta.1-macos-intel.zip](https://github.com/grahamfairbank/sonos-analyzer/releases/download/v0.4.0-beta.1/SonosAnalyzer-0.4.0-beta.1-macos-intel.zip) (about 9 MB) |
 
 To check which Mac you have: Apple menu > **About This Mac**. "Chip: Apple M…" means Apple silicon; "Processor: Intel…" means Intel.
+
+These links are for this pilot version; newer versions are listed on the [releases page](https://github.com/grahamfairbank/sonos-analyzer/releases), under **Assets**.
 
 ## Windows
 
