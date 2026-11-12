@@ -54,6 +54,9 @@ def local_addresses() -> list[str]:
     except (AttributeError, OSError):
         return addresses
     for name in names:
+        # Docker's own bridges only lead to containers.
+        if name.startswith(("docker", "br-", "veth")):
+            continue
         try:
             address = interface_address(name)
         except (ImportError, OSError):
@@ -61,6 +64,19 @@ def local_addresses() -> list[str]:
         if not address.startswith("127.") and address not in addresses:
             addresses.append(address)
     return addresses
+
+
+def off_network_hint(ips: list[str]) -> str:
+    """Explain unreachable speakers that sit on a network this host has no address on."""
+    local = local_addresses()
+    prefixes = {ip.rsplit(".", 1)[0] for ip in local}
+    foreign = sorted({ip.rsplit(".", 1)[0] for ip in ips} - prefixes)
+    if not local or not foreign:
+        return ""
+    return (
+        f"The speakers are on {', '.join(f'{p}.x' for p in foreign)}, but this host has no address on that "
+        f"network (it has {', '.join(local)}). Check that its connection to the speakers' network is up."
+    )
 
 
 def discover_speakers(timeout: float = 3.0, interface: str | None = None) -> list[DiscoveredSpeaker]:
@@ -105,7 +121,11 @@ def discover_speakers(timeout: float = 3.0, interface: str | None = None) -> lis
                 except OSError:
                     continue
 
-                match = LOCATION_RE.search(data.decode("utf-8", errors="replace"))
+                text = data.decode("utf-8", errors="replace")
+                # Other UPnP devices sometimes answer searches that are not for them.
+                if "sonos" not in text.lower() and SEARCH_TARGET not in text:
+                    continue
+                match = LOCATION_RE.search(text)
                 if not match:
                     continue
 

@@ -15,7 +15,7 @@ from importlib import resources
 from sonos_analyzer import __version__
 from sonos_analyzer.analyze import AnalysisReport, analyze
 from sonos_analyzer.collect import collect_snapshot
-from sonos_analyzer.discovery import discover_speakers
+from sonos_analyzer.discovery import discover_speakers, off_network_hint
 from sonos_analyzer.report import render_html, report_payload
 
 
@@ -85,9 +85,10 @@ def run_scan(ips: list[str], discover_timeout: float) -> AnalysisReport:
 
         snapshot = collect_snapshot(ips)
         if not snapshot.speakers:
+            hint = off_network_hint(ips)
             raise ScanError(
                 HTTPStatus.BAD_GATEWAY,
-                "Could not read diagnostics from any speaker.",
+                "Could not read diagnostics from any speaker." + (f" {hint}" if hint else ""),
                 snapshot.fetch_errors,
             )
 

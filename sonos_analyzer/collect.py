@@ -11,6 +11,7 @@ from sonos_analyzer.fetch import (
     fetch_device_description,
     fetch_review,
     fetch_zone_group_state,
+    is_reachable,
 )
 from sonos_analyzer.parse import (
     HouseholdSnapshot,
@@ -38,8 +39,15 @@ def collect_snapshot(ips: list[str], phy_sample_seconds: float = 5.0) -> Househo
 
     # One speaker's review covers the whole household, so only ask speakers
     # that no earlier answer has described yet.
+    # Rule out unreachable speakers together, instead of waiting on each in turn.
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
+        up = dict(zip(ips, pool.map(is_reachable, ips)))
+
     for ip in ips:
         if ip in covered:
+            continue
+        if not up[ip]:
+            snapshot.fetch_errors.append(f"{ip}: no response on port 1400")
             continue
         try:
             review = parse_review_xml(fetch_review(ip))

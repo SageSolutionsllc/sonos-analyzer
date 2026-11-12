@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import socket
 import urllib.error
 import urllib.request
 import xml.etree.ElementTree as ET
@@ -47,6 +48,15 @@ def _soap(ip: str, service_path: str, action: str, body: str) -> str:
     )
     with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
         return resp.read().decode("utf-8", errors="replace")
+
+
+def is_reachable(ip: str, timeout: float = 2.0) -> bool:
+    """Quick check that the speaker's port accepts connections."""
+    try:
+        with socket.create_connection((ip, DEFAULT_PORT), timeout=timeout):
+            return True
+    except OSError:
+        return False
 
 
 def fetch_review(ip: str) -> str:

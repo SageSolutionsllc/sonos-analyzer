@@ -9,7 +9,7 @@ from pathlib import Path
 
 from sonos_analyzer.analyze import analyze
 from sonos_analyzer.collect import collect_snapshot
-from sonos_analyzer.discovery import discover_speakers
+from sonos_analyzer.discovery import discover_speakers, off_network_hint
 from sonos_analyzer.report import print_terminal, write_html, write_json
 
 
@@ -79,6 +79,8 @@ def main(argv: list[str] | None = None) -> int:
     snapshot = collect_snapshot(ips, phy_sample_seconds=args.phy_sample)
     if not snapshot.speakers:
         print("Could not read diagnostics from any speaker.", file=sys.stderr)
+        if hint := off_network_hint(ips):
+            print(hint, file=sys.stderr)
         for err in snapshot.fetch_errors:
             print(f"  {err}", file=sys.stderr)
         return 1
