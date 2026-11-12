@@ -79,8 +79,9 @@ def run_scan(ips: list[str], discover_timeout: float) -> AnalysisReport:
             if not ips:
                 raise ScanError(
                     HTTPStatus.NOT_FOUND,
-                    "No Sonos speakers discovered via SSDP. Enter speaker IPs manually, "
-                    "and check the container is running with host networking.",
+                    "No Sonos speakers discovered. Enter one speaker's IP address above and scan "
+                    "again; one speaker is enough to find the rest. Discovery does not work under "
+                    "Docker Desktop, or when this computer is on a different network from the speakers.",
                 )
 
         snapshot = collect_snapshot(ips)

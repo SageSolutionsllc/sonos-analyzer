@@ -1,0 +1,11 @@
+# For Docker Desktop on macOS and Windows (or any machine without host networking).
+# Speaker discovery does not work here, so type one speaker's IP address into the UI.
+# The UI is published on this computer only (127.0.0.1), because it has no login.
+services:
+  sonos-analyzer:
+    build: .
+    image: sonos-analyzer:latest
+    container_name: sonos-analyzer
+    ports:
+      - "127.0.0.1:8400:8400"
+    restart: unless-stopped

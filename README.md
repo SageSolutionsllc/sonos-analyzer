@@ -6,9 +6,27 @@ This is a fork of [soinkleined/sonos-analyzer](https://github.com/soinkleined/so
 
 Uses the same diagnostic endpoints Sonos exposes locally (`/support/review`, UPnP zone topology). **No cloud account required.** Your speakers must be reachable on the same network as the machine running this tool.
 
+## Get started
+
+Pick the setup that matches what you have:
+
+| You have | Do this | Time |
+|---|---|---|
+| **A Windows or Mac laptop** | Install Docker Desktop, then run one command. See **[Run on a laptop with Docker Desktop](docs/docker-desktop.md)** for the easy route (ready-built image) or the inspect-the-code route (build it yourself). | About 15 minutes, mostly installing Docker Desktop |
+| **A Linux server, NAS or Raspberry Pi** on the speakers' network | Follow [Quick start with Docker](#quick-start-with-docker) below. Speakers are discovered automatically. | About 5 minutes |
+| **Python 3.10+** and no Docker | Follow [Install with Python](#install-with-python). | About 2 minutes |
+
+The quickest way to try it on any machine with Docker:
+
+```bash
+docker run -d --name sonos-analyzer -p 127.0.0.1:8400:8400 --restart unless-stopped ghcr.io/grahamfairbank/sonos-analyzer:latest
+```
+
+Then open http://localhost:8400, type one speaker's IP address and press **Scan network**. The ready-built image is made by GitHub Actions from the tagged source of each release, for Intel/AMD and ARM.
+
 ## Quick start with Docker
 
-The easiest way to run the web UI. You need a Linux machine on the same network as your speakers, with [Docker Engine](https://docs.docker.com/engine/install/) and the Compose plugin (`docker compose version` should print a version).
+For a server that stays on the speakers' network, with automatic discovery. (No server? See [Run on a laptop with Docker Desktop](docs/docker-desktop.md).) You need a Linux machine on the same network as your speakers, with [Docker Engine](https://docs.docker.com/engine/install/) and the Compose plugin (`docker compose version` should print a version).
 
 ```bash
 git clone https://github.com/grahamfairbank/sonos-analyzer.git
@@ -48,6 +66,14 @@ Set these under `environment:` in `docker-compose.yml`, then run `docker compose
 
 ### Without Compose
 
+Using the ready-built image:
+
+```bash
+docker run -d --name sonos-analyzer --network host --restart unless-stopped ghcr.io/grahamfairbank/sonos-analyzer:latest
+```
+
+Or build it yourself from the source:
+
 ```bash
 docker build -t sonos-analyzer .
 docker run -d --name sonos-analyzer --network host --restart unless-stopped sonos-analyzer
@@ -59,13 +85,7 @@ Add `-e SONOS_ANALYZER_PORT=9000` (or any other setting above) before the image 
 
 The container uses the host's network directly (`network_mode: host`) rather than a published port. Speaker discovery relies on multicast, which does not cross Docker's default bridge network. This works on Linux.
 
-Docker Desktop on macOS and Windows runs containers inside a virtual machine, so host networking does not reach your LAN and discovery finds nothing. On those systems either run the tool with Python (below), or publish the port and type speaker IPs into the UI instead of using discovery:
-
-```bash
-docker run -d --name sonos-analyzer -p 8400:8400 sonos-analyzer
-```
-
-This bridge-mode setup has not been tested against speakers on macOS or Windows.
+Docker Desktop on macOS and Windows runs containers inside a virtual machine, so discovery finds nothing there. **On a Windows or Mac laptop, follow [Run Sonos Analyzer on a laptop with Docker Desktop](docs/docker-desktop.md)**: it uses `docker-compose.desktop.yml`, which publishes the UI on `http://localhost:8400`, and you type one speaker's IP address instead of using discovery.
 
 ### Troubleshooting
 
@@ -155,16 +175,17 @@ sonos-analyzer --ips 192.168.1.165,192.168.1.89,192.168.1.193 \
 
 ## Changes from the original
 
-Based on [soinkleined/sonos-analyzer](https://github.com/soinkleined/sonos-analyzer) 0.1.0. This fork (0.2.0) adds:
+Based on [soinkleined/sonos-analyzer](https://github.com/soinkleined/sonos-analyzer) 0.1.0. This fork adds:
 
 - A web UI (`sonos-analyzer-web`) and a Docker image / compose file
 - Rooms: stereo pairs and home theater sets grouped with roles, and checked as a unit
 - Measured Wi-Fi PHY error rates, a radio channel map and a speaker-to-speaker signal matrix
 - Wired checks, per-model firmware comparison, and findings grouped per issue
 - Discovery on every network interface, and scans roughly five times faster on large households
+- A ready-built multi-architecture image on GitHub Container Registry, and a Docker Desktop guide for laptops
 - Fixes: model name and version were never read from the device description; the Trueplay state was interpreted the wrong way round
 
-Tested against one household (Sonos S2, Wi-Fi and Ethernet, SonosNet off). SonosNet / Boost setups, S1 systems and portable speakers are untested.
+Tested against one household (Sonos S2, Wi-Fi and Ethernet, SonosNet off), on Linux. SonosNet / Boost setups, S1 systems and portable speakers are untested.
 
 ## License
 
