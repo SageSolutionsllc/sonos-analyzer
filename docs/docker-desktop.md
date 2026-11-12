@@ -42,7 +42,7 @@ Paste this into the terminal and press Enter:
 docker run -d --name sonos-analyzer -p 127.0.0.1:8400:8400 --restart unless-stopped ghcr.io/grahamfairbank/sonos-analyzer:latest
 ```
 
-Docker downloads the image (about 50 MB) and starts it. It then appears as **sonos-analyzer** in the **Containers** list in Docker Desktop, where you can stop, start and delete it without the terminal.
+Docker downloads the image (about 45 MB) and starts it. It then appears as **sonos-analyzer** in the **Containers** list in Docker Desktop, where you can stop, start and delete it without the terminal.
 
 Now go to [Scan](#scan).
 

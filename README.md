@@ -175,7 +175,7 @@ sonos-analyzer --ips 192.168.1.165,192.168.1.89,192.168.1.193 \
 
 ## Changes from the original
 
-Based on [soinkleined/sonos-analyzer](https://github.com/soinkleined/sonos-analyzer) 0.1.0. This fork adds:
+See [CHANGELOG.md](CHANGELOG.md) for each release. Based on [soinkleined/sonos-analyzer](https://github.com/soinkleined/sonos-analyzer) 0.1.0. This fork adds:
 
 - A web UI (`sonos-analyzer-web`) and a Docker image / compose file
 - Rooms: stereo pairs and home theater sets grouped with roles, and checked as a unit
