@@ -25,7 +25,7 @@ jobs:
         include:
           - os: windows-latest
             label: windows-x64
-          - os: macos-latest
+          - os: macos-15
             label: macos-apple-silicon
           - os: macos-15-intel
             label: macos-intel
