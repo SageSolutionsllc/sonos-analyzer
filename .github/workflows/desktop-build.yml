@@ -90,6 +90,8 @@ jobs:
 
   attach:
     needs: build
+    # Attach whatever built, so one stuck runner doesn't hold back the other platforms.
+    if: ${{ always() }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v8
