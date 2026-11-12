@@ -10,12 +10,19 @@ from datetime import datetime, timezone
 from sonos_analyzer.parse import HouseholdSnapshot, SpeakerDiagnostics
 
 
-# PHY error rate: flag radios well above the household's typical level.
+# PHY error rate: flag radios well above the typical level for their band.
+# The per-band floors are starting points, not measured values: tune them from field scans.
 PHY_RATE_OUTLIER_FACTOR = 5
-PHY_RATE_MIN_PER_SEC = 500
-NOISE_FLOOR_ELEVATED_DBM = -85
+PHY_RATE_MIN_PER_SEC = {"2.4 GHz": 2000, "5 GHz": 500}
+# 2.4 GHz is routinely louder in dense housing. Starting points, tune from field scans.
+NOISE_FLOOR_ELEVATED_DBM = {"2.4 GHz": -80, "5 GHz": -85}
 RX_DROP_RATIO_PCT = 20
 INTERFACE_ERROR_RATIO_PCT = 0.01
+# Lifetime counters on a recently booted speaker are too small to judge.
+INTERFACE_ERROR_MIN_PACKETS = 100_000
+# Products that never use SonosNet (Sonos "Choose between a wireless and wired setup", 2026),
+# matched as lower-case substrings of the model name.
+NO_SONOSNET_MODELS = ("era 100", "era 300", "arc ultra", "move", "roam", "sub 4", "sonos play")
 
 ROLE_ORDER = ["Front", "Left", "Right", "Left surround", "Right surround", "Sub"]
 # 5 GHz 80 MHz blocks, by first channel
@@ -32,6 +39,10 @@ class Finding:
     # One entry per affected speaker: {"name", "ip", "note"}
     affected: list[dict] = field(default_factory=list)
     recommendation: str = ""
+    # How far to trust the finding before acting on it:
+    # high = read directly from the speakers; medium = inferred from one snapshot;
+    # low = a statistical or proxy heuristic - confirm on the network side first.
+    confidence: str = "high"
 
     def __post_init__(self) -> None:
         if not self.affected_ips:
@@ -67,9 +78,12 @@ def analyze(snapshot: HouseholdSnapshot) -> AnalysisReport:
     findings += _wireless_findings(speakers)
     findings += _wired_findings(speakers)
     findings += _calibration_findings(rooms)
+    findings += _reachability_findings(snapshot)
 
     recommendations = [f.recommendation for f in sorted(findings, key=_severity_rank) if f.recommendation]
-    if not any(f.severity in {"high", "medium"} for f in findings):
+    if snapshot.fetch_errors:
+        recommendations.append("Some speakers could not be read, so this report is incomplete.")
+    elif not any(f.severity in {"high", "medium"} for f in findings):
         recommendations.append("No significant issues detected.")
     recommendations.append("Reserve DHCP addresses for each speaker so IPs stay stable.")
     if any(_radio_use(sp) == "wifi" and _band(_active_freq(sp)) == "2.4 GHz" for sp in speakers):
@@ -136,15 +150,21 @@ def _room_findings(
 
 
 def _stereo_pair_findings(name: str, members: list[SpeakerDiagnostics]) -> list[Finding]:
+    # Pair + Sub and speaker + Sub land here too; judge the full-range speakers only.
+    members = [sp for sp in members if sp.role != "Sub"] or members
+    if len(members) < 2:
+        return []
     paths = {_path(sp) for sp in members}
     wired = [sp for sp in members if _path(sp) == "wired"]
-    wireless = [sp for sp in members if _path(sp) != "wired"]
+    # A wired speaker with its partner on SonosNet is the normal SonosNet layout, not a fault.
+    wireless = [sp for sp in members if _path(sp) not in {"wired", "sonosnet"}]
     affected = _affected(members, lambda sp: _connection_summary(sp))
 
     if wired and wireless:
         return [
             Finding(
-                severity="high",
+                severity="medium",
+                confidence="medium",
                 category="rooms",
                 title=f"Stereo pair '{name}' is mixed wired + wireless",
                 detail=(
@@ -153,7 +173,8 @@ def _stereo_pair_findings(name: str, members: list[SpeakerDiagnostics]) -> list[
                 ),
                 affected=affected,
                 recommendation=(
-                    f"{name}: wire both speakers of the pair, or unplug Ethernet and run both on Wi-Fi."
+                    f"{name}: wire both speakers of the pair (with SonosNet disabled in the Sonos app), "
+                    "or unplug Ethernet and run both on Wi-Fi."
                 ),
             )
         ]
@@ -163,11 +184,13 @@ def _stereo_pair_findings(name: str, members: list[SpeakerDiagnostics]) -> list[
         return [
             Finding(
                 severity="medium",
+                confidence="medium",
                 category="rooms",
                 title=f"Stereo pair '{name}' is split across Wi-Fi channels",
                 detail=(
-                    "The two speakers are connected to different access points or bands. "
-                    "Audio between them then crosses your router instead of staying on one radio."
+                    "The two speakers are connected to different access points or bands, so audio between them "
+                    "crosses the network instead of staying on one radio. Two access points on the same channel "
+                    "would not show here: check each speaker's access point in the network controller."
                 ),
                 affected=affected,
                 recommendation=(
@@ -177,6 +200,18 @@ def _stereo_pair_findings(name: str, members: list[SpeakerDiagnostics]) -> list[
             )
         ]
 
+    known = len(paths) == 1 and "unknown" not in paths
+    if not known:
+        return [
+            Finding(
+                severity="info",
+                confidence="medium",
+                category="rooms",
+                title=f"Stereo pair '{name}' could not be fully checked",
+                detail="Connection paths: " + ", ".join(sorted(paths)) + ".",
+                affected=affected,
+            )
+        ]
     path = "wired" if paths == {"wired"} else "on the same Wi-Fi channel" if paths == {"wifi"} else "on the same path"
     return [
         Finding(
@@ -204,11 +239,13 @@ def _home_theater_findings(
         findings.append(
             Finding(
                 severity="medium",
+                confidence="medium",
                 category="rooms",
                 title=f"Home theater '{name}' has satellites on home Wi-Fi",
                 detail=(
                     "Surrounds and subs normally connect straight to the soundbar over its own 5 GHz link. "
-                    "These are going through your router instead, which adds delay and dropouts."
+                    "These are going through your router instead, which adds delay and dropouts. "
+                    "A satellite that just restarted can show this briefly: scan again in 5 minutes to confirm."
                 ),
                 affected=_affected(via_wifi, _connection_summary),
                 recommendation=f"{name}: power-cycle the listed satellites so they rejoin the soundbar directly.",
@@ -216,16 +253,24 @@ def _home_theater_findings(
         )
 
     shared = _block_5ghz(link_channel)
-    overlapping = sorted(ch for ch in wifi_channels if ch and shared and _block_5ghz(ch) == shared)
+    # A soundbar on 5 GHz Wi-Fi shares that radio with its surround link, so its own channel
+    # always "overlaps", and moving the access point channel would only move the link with it.
+    own = _channel(_active_freq(primary)) if _path(primary) == "wifi" else None
+    overlapping = sorted(
+        ch for ch in wifi_channels if ch and ch != own and shared and _block_5ghz(ch) == shared
+    )
     if linked and overlapping:
         findings.append(
             Finding(
                 severity="low",
+                confidence="low",
                 category="rooms",
                 title=f"Home theater '{name}' surround link overlaps your Wi-Fi",
                 detail=(
                     f"The soundbar's surround link is on channel {link_channel}, in the same 80 MHz block as "
-                    f"Wi-Fi channel {', '.join(map(str, overlapping))} used by other speakers."
+                    f"Wi-Fi channel {', '.join(map(str, overlapping))} used by other speakers. "
+                    "This assumes 80 MHz-wide access point channels and only sees channels that speakers use: "
+                    "check the channel and width of every access point near this room."
                 ),
                 affected=_affected([primary], lambda sp: f"link on channel {link_channel}"),
                 recommendation=f"{name}: move the router's 5 GHz channel away from {link_channel}.",
@@ -235,7 +280,7 @@ def _home_theater_findings(
     if _path(primary) == "wifi" and satellites:
         findings.append(
             Finding(
-                severity="low",
+                severity="info",
                 category="rooms",
                 title=f"Home theater '{name}' soundbar is on Wi-Fi",
                 detail=(
@@ -289,7 +334,8 @@ def _firmware_summary(speakers: list[SpeakerDiagnostics]) -> list[dict]:
     summary = []
     for version, members in sorted(groups.items(), key=lambda kv: _version_tuple(kv[0]), reverse=True):
         parsed = _version_tuple(version)
-        behind = [sp for sp in members if parsed < newest_by_model[_model(sp)]]
+        # A speaker that did not report a version is unknown, not behind.
+        behind = [sp for sp in members if parsed and parsed < newest_by_model[_model(sp)]]
         if parsed == newest:
             status = "newest"
         elif behind:
@@ -319,15 +365,20 @@ def _firmware_findings(
     by_ip = {sp.ip_address: sp for sp in speakers}
 
     for members in rooms.values():
-        versions = {sp.software_version for sp in members}
+        # An unreported version is not a mismatch.
+        versions = {sp.software_version for sp in members if sp.software_version}
         if len(versions) > 1:
             name = _room_name(members[0])
             findings.append(
                 Finding(
                     severity="high",
+                    confidence="medium",
                     category="firmware",
                     title=f"'{name}' has speakers on different firmware",
-                    detail="Bonded speakers (pairs, surrounds, subs) must run the same version to play together.",
+                    detail=(
+                        "Bonded speakers (pairs, surrounds, subs) must run the same version to play together. "
+                        "Speakers update one after another, so scan again in 15 minutes before acting."
+                    ),
                     affected=_affected(members, lambda sp: sp.software_version),
                     recommendation=f"{name}: run Settings > System > System Updates in the Sonos app.",
                 )
@@ -338,6 +389,7 @@ def _firmware_findings(
         findings.append(
             Finding(
                 severity="medium",
+                confidence="medium",
                 category="firmware",
                 title=f"{len(behind)} speaker(s) behind on firmware",
                 detail="Other speakers of the same model in this household already run a newer version.",
@@ -402,6 +454,8 @@ def _path(sp: SpeakerDiagnostics) -> str:
 def _radio_on(sp: SpeakerDiagnostics) -> bool:
     if _path(sp) != "wired":
         return True
+    if sp.wifi_enabled is False:
+        return False
     return sp.connection_type_code != "4" and (sp.wifi_enabled is True or sp.phy_errors is not None)
 
 
@@ -454,7 +508,8 @@ def _radio_use(sp: SpeakerDiagnostics) -> str:
         if not _radio_on(sp):
             return "off"
         return "ht_link" if sp.ht_channel_mhz else "idle"
-    return {"satellite": "ht_link", "wifi": "wifi", "sonosnet": "sonosnet"}.get(path, "wifi")
+    # An unclassified path stays "unknown" rather than being treated as home Wi-Fi.
+    return {"satellite": "ht_link", "wifi": "wifi", "sonosnet": "sonosnet"}.get(path, "unknown")
 
 
 RADIO_USE_LABEL = {
@@ -463,6 +518,7 @@ RADIO_USE_LABEL = {
     "sonosnet": "SonosNet",
     "idle": "Wired, radio on but unused",
     "off": "Wired, radio off",
+    "unknown": "Connection not identified",
 }
 
 
@@ -519,11 +575,11 @@ def _wireless_findings(speakers: list[SpeakerDiagnostics]) -> list[Finding]:
     if on_24:
         findings.append(
             Finding(
-                severity="low",
+                severity="info",
                 category="wireless",
                 title=f"{len(on_24)} speaker(s) on 2.4 GHz Wi-Fi",
                 detail=(
-                    "2.4 GHz is the most congested band. Some models only support 2.4 GHz; "
+                    "2.4 GHz is the most congested band. Amp, Arc, Beam and Ray only join Wi-Fi on 2.4 GHz; "
                     "for those, Ethernet is the way to avoid it."
                 ),
                 affected=_affected(on_24, lambda sp: f"channel {_channel(_active_freq(sp))}"),
@@ -535,6 +591,7 @@ def _wireless_findings(speakers: list[SpeakerDiagnostics]) -> list[Finding]:
         findings.append(
             Finding(
                 severity="low",
+                confidence="medium",
                 category="wireless",
                 title=f"{len(dfs)} speaker(s) on a 5 GHz DFS channel",
                 detail=(
@@ -542,54 +599,68 @@ def _wireless_findings(speakers: list[SpeakerDiagnostics]) -> list[Finding]:
                     "which briefly disconnects everything on them."
                 ),
                 affected=_affected(dfs, lambda sp: f"channel {_channel(_active_freq(sp))}"),
-                recommendation="If you see periodic whole-house dropouts, move the router's 5 GHz radio off DFS channels.",
+                recommendation=(
+                    "If you see periodic whole-house dropouts, check the access point event log for radar "
+                    "detections; if there are any, move its 5 GHz radio to channels 36-48."
+                ),
             )
         )
 
-    # Compare like with like: speakers on home Wi-Fi against each other.
-    measured = [sp for sp in wifi if sp.phy_error_rate is not None]
-    if len(measured) < 3:
-        measured = [sp for sp in active if sp.phy_error_rate is not None]
-    if len(measured) >= 3:
+    # Compare like with like: radios in the same band against each other (2.4 GHz always counts far
+    # more PHY errors than 5 GHz), and only flag a radio that stayed high in every sample window.
+    for band, floor in PHY_RATE_MIN_PER_SEC.items():
+        measured = [sp for sp in active if sp.phy_error_rate is not None and _band(_active_freq(sp)) == band]
+        if len(measured) < 3:
+            continue
         median = statistics.median(sp.phy_error_rate for sp in measured)
-        threshold = max(PHY_RATE_MIN_PER_SEC, PHY_RATE_OUTLIER_FACTOR * median)
+        threshold = max(floor, PHY_RATE_OUTLIER_FACTOR * median)
         noisy = sorted(
-            (sp for sp in active if (sp.phy_error_rate or 0) >= threshold),
-            key=lambda sp: -(sp.phy_error_rate or 0),
+            (sp for sp in measured if min(sp.phy_error_rates or [sp.phy_error_rate]) >= threshold),
+            key=lambda sp: -sp.phy_error_rate,
         )
-        if noisy:
+        if not noisy:
+            continue
 
-            def note(sp: SpeakerDiagnostics) -> str:
-                times = f", {sp.phy_error_rate / median:.0f}x typical" if median >= 1 else ""
-                return f"{sp.phy_error_rate:,.0f}/s{times}"
+        def note(sp: SpeakerDiagnostics, median: float = median) -> str:
+            times = f", {sp.phy_error_rate / median:.0f}x typical" if median >= 1 else ""
+            return f"{sp.phy_error_rate:,.0f}/s{times}"
 
-            findings.append(
-                Finding(
-                    severity="medium",
-                    category="wireless",
-                    title=f"Unusually noisy radio environment at {_names(noisy)}",
-                    detail=(
-                        f"PHY errors are signals the radio could not decode. Most speakers here see about "
-                        f"{median:,.0f} per second; these see far more, which points to interference or a weak "
-                        "signal at that spot rather than a household-wide problem."
-                    ),
-                    affected=_affected(noisy, note),
-                    recommendation=(
-                        f"{_names(noisy)}: move the speaker away from other electronics, metal and thick walls, "
-                        "or closer to an access point; wire it if a cable is available."
-                    ),
-                )
+        findings.append(
+            Finding(
+                severity="low",
+                confidence="low",
+                category="wireless",
+                title=f"Unusually noisy {band} radio environment at {_names(noisy)}",
+                detail=(
+                    f"PHY errors are signals the radio could not decode. Most {band} speakers here see about "
+                    f"{median:,.0f} per second; these stayed far above that in every sample, which points to "
+                    "interference or a weak signal at that spot. This compares speakers with each other, so a "
+                    "problem affecting the whole house would not show here."
+                ),
+                affected=_affected(noisy, note),
+                recommendation=(
+                    f"{_names(noisy)}: check signal, retries and channel use for these speakers in the network "
+                    "controller before moving anything."
+                ),
             )
+        )
 
-    loud = [sp for sp in active if (_noise_floor(sp) or -200) > NOISE_FLOOR_ELEVATED_DBM]
+    def noise_limit(sp: SpeakerDiagnostics) -> int:
+        return NOISE_FLOOR_ELEVATED_DBM.get(_band(_active_freq(sp)), -85)
+
+    loud = [sp for sp in active if (_noise_floor(sp) or -200) > noise_limit(sp)]
     if loud:
         findings.append(
             Finding(
-                severity="medium",
+                severity="low",
+                confidence="low",
                 category="wireless",
                 title=f"Elevated noise floor on {len(loud)} speaker(s)",
-                detail=f"A noise floor above {NOISE_FLOOR_ELEVATED_DBM} dBm leaves little headroom for the Wi-Fi signal.",
-                affected=_affected(loud, lambda sp: f"{_noise_floor(sp)} dBm"),
+                detail=(
+                    "A high noise floor leaves little headroom for the signal. This is one reading, "
+                    "and a wider channel raises it on its own: scan again to confirm."
+                ),
+                affected=_affected(loud, lambda sp: f"{_noise_floor(sp)} dBm (limit {noise_limit(sp)})"),
                 recommendation="Look for interference sources near the listed speakers, or change Wi-Fi channel.",
             )
         )
@@ -729,9 +800,23 @@ def _rx_drop_ratio(sp: SpeakerDiagnostics) -> float | None:
 
 
 def _error_ratio(sp: SpeakerDiagnostics) -> float:
-    errors = sp.eth0.rx_errors + sp.eth0.tx_errors + sp.br0.rx_errors + sp.br0.tx_errors
-    packets = sp.eth0.rx_packets + sp.eth0.tx_packets + sp.br0.rx_packets + sp.br0.tx_packets
-    return 100.0 * errors / packets if packets else 0.0
+    # The advice is about the cable, so only the physical port counts.
+    errors = sp.eth0.rx_errors + sp.eth0.tx_errors
+    packets = sp.eth0.rx_packets + sp.eth0.tx_packets
+    if packets < INTERFACE_ERROR_MIN_PACKETS:
+        return 0.0
+    return 100.0 * errors / packets
+
+
+def _bad_link(speed: str) -> bool:
+    """10 Mbps or half duplex. 100 Mbps full duplex is normal for many Sonos ports."""
+    mbps = re.match(r"\d+", speed)
+    return bool(mbps) and (int(mbps.group()) < 100 or "HD" in speed.upper() or "HALF" in speed.upper())
+
+
+def _no_sonosnet(sp: SpeakerDiagnostics) -> bool:
+    model = _model(sp).lower()
+    return any(m in model for m in NO_SONOSNET_MODELS)
 
 
 def _wired_findings(speakers: list[SpeakerDiagnostics]) -> list[Finding]:
@@ -739,26 +824,37 @@ def _wired_findings(speakers: list[SpeakerDiagnostics]) -> list[Finding]:
     wired = [sp for sp in speakers if _path(sp) == "wired"]
     sonosnet_in_use = any(_path(sp) == "sonosnet" for sp in speakers)
 
-    idle_radio = [sp for sp in wired if _radio_use(sp) == "idle"]
-    if idle_radio and not sonosnet_in_use:
+    def hosts_others(sp: SpeakerDiagnostics) -> bool:
+        # A wired soundbar, Amp or pair member whose Sub, surrounds or partner are not wired reaches
+        # them through its radio, whether or not the speaker reported a home theater channel.
+        return any(
+            other is not sp and _room_key(other) == _room_key(sp) and _path(other) != "wired"
+            for other in speakers
+        )
+
+    # Turning the radio off on a speaker others depend on cuts them off, so only suggest it when
+    # nothing in the household could be using that radio.
+    idle_radio = [sp for sp in wired if _radio_use(sp) == "idle" and not hosts_others(sp)]
+    if idle_radio and not sonosnet_in_use and not any(_path(sp) == "unknown" for sp in speakers):
         findings.append(
             Finding(
                 severity="low",
                 category="wired",
                 title=f"Wi-Fi radio still on for {len(idle_radio)} wired speaker(s)",
                 detail=(
-                    "These speakers are on Ethernet and nothing connects through their radio, "
-                    "so it only adds to local Wi-Fi congestion."
+                    "These speakers are on Ethernet and nothing in this scan connects through their radio. "
+                    "With other wired speakers, a radio left on can bridge Ethernet and SonosNet."
                 ),
                 affected=_affected(idle_radio, _connection_summary),
                 recommendation=(
-                    f"{_names(idle_radio)}: turn the radio off in the Sonos app "
-                    "(Settings > System > [room] > [product] > Disable Wi-Fi)."
+                    "Prefer turning SonosNet off for the whole system in the Sonos app "
+                    "(Settings > Network > SonosNet). Only disable Wi-Fi on a single speaker after confirming "
+                    "in the Sonos app that no Sub, surround or other speaker connects through it."
                 ),
             )
         )
 
-    slow = [sp for sp in wired if sp.ethernet_speed and not re.fullmatch(r"1\d{2,}(FD)?", sp.ethernet_speed)]
+    slow = [sp for sp in wired if sp.ethernet_speed and _bad_link(sp.ethernet_speed)]
     if slow:
         findings.append(
             Finding(
@@ -771,14 +867,18 @@ def _wired_findings(speakers: list[SpeakerDiagnostics]) -> list[Finding]:
             )
         )
 
-    errors = [sp for sp in speakers if _error_ratio(sp) >= INTERFACE_ERROR_RATIO_PCT]
+    errors = [sp for sp in wired if _error_ratio(sp) >= INTERFACE_ERROR_RATIO_PCT]
     if errors:
         findings.append(
             Finding(
                 severity="medium",
+                confidence="medium",
                 category="wired",
-                title=f"Interface errors on {len(errors)} speaker(s)",
-                detail=f"More than {INTERFACE_ERROR_RATIO_PCT}% of packets on the network interface had errors.",
+                title=f"Ethernet errors on {len(errors)} speaker(s)",
+                detail=(
+                    f"More than {INTERFACE_ERROR_RATIO_PCT}% of packets on the Ethernet port had errors since the "
+                    "speaker started. Compare with the switch port's own error counters."
+                ),
                 affected=_affected(errors, lambda sp: f"{_error_ratio(sp):.3f}% errors"),
                 recommendation=f"{_names(errors)}: check the Ethernet cable and switch port.",
             )
@@ -793,18 +893,43 @@ def _wired_findings(speakers: list[SpeakerDiagnostics]) -> list[Finding]:
     if dropping:
         findings.append(
             Finding(
-                severity="low",
+                severity="info",
+                confidence="low",
                 category="wired",
                 title=f"High bridge RX drop ratio on {len(dropping)} speaker(s)",
                 detail=(
-                    "Sonos counts filtered multicast as drops, so some is normal, "
-                    "but unusually high ratios can indicate a busy or looping network."
+                    "Sonos counts filtered multicast as drops, so some is normal. This is a total since the "
+                    "speaker started: only a jump between two scans, together with signs of a loop or broadcast "
+                    "storm on the network, points to a problem."
                 ),
                 affected=_affected(dropping, lambda sp: f"{_rx_drop_ratio(sp):.1f}%"),
             )
         )
 
-    meshed = [sp for sp in speakers if sp.stp_enabled]
+    bridging = [sp for sp in speakers if sp.stp_enabled]
+    # A wired speaker running spanning tree with no wireless SonosNet member is not a mesh.
+    meshed = bridging if sonosnet_in_use else []
+    wired_stp = [sp for sp in wired if sp.stp_enabled]
+    if len(wired_stp) >= 2:
+        findings.append(
+            Finding(
+                severity="medium",
+                confidence="medium",
+                category="wired",
+                title=f"{len(wired_stp)} wired speakers are running spanning tree",
+                detail=(
+                    "Each one can bridge its Ethernet port to SonosNet, giving the switches a second path between "
+                    "them. Sonos uses classic STP while most switches default to RSTP, which can block ports "
+                    "or loop."
+                ),
+                affected=_affected(wired_stp, _connection_summary),
+                recommendation=(
+                    "Turn SonosNet off for the whole system in the Sonos app (Settings > Network > SonosNet), "
+                    "or set the switches up for Sonos STP (a switch as root bridge). Check the switches for "
+                    "blocked ports first."
+                ),
+            )
+        )
     if meshed:
         roots = [sp for sp in meshed if sp.stp_is_root]
         blocking = [sp for sp in meshed if any(state == "blocking" for _port, state in sp.stp_ports)]
@@ -821,17 +946,47 @@ def _wired_findings(speakers: list[SpeakerDiagnostics]) -> list[Finding]:
                 affected=_affected(meshed, _connection_summary),
             )
         )
-        if any(_path(sp) == "wifi" for sp in speakers):
+        # Models with no SonosNet mode can only ever be on home Wi-Fi; that is not a mix to fix.
+        could_join = [sp for sp in speakers if _path(sp) == "wifi" and not _no_sonosnet(sp)]
+        if could_join:
             findings.append(
                 Finding(
                     severity="low",
+                    confidence="medium",
                     category="wired",
                     title="Household mixes SonosNet and home Wi-Fi",
                     detail="Some speakers use SonosNet while others use your Wi-Fi; grouping across the two is less reliable.",
-                    affected=_affected([sp for sp in speakers if _path(sp) == "wifi"], _connection_summary),
+                    affected=_affected(could_join, _connection_summary),
                 )
             )
     return findings
+
+
+# --- Reachability -----------------------------------------------------------
+
+
+def _reachability_findings(snapshot: HouseholdSnapshot) -> list[Finding]:
+    if not snapshot.fetch_errors:
+        return []
+    errors = list(dict.fromkeys(snapshot.fetch_errors))
+    return [
+        Finding(
+            severity="medium",
+            category="reachability",
+            title=f"{len(errors)} speaker(s) or request(s) could not be read",
+            detail=(
+                "These did not answer, so they are missing from the checks above. A sleeping portable, a speaker "
+                "mid-update or one that has dropped off the network all look like this. Errors: "
+                + "; ".join(errors[:10])
+                + ("; ..." if len(errors) > 10 else "")
+            ),
+            affected_ips=[e.split(":", 1)[0] for e in errors if ":" in e],
+            recommendation=(
+                "Wake any portables and scan again. If a speaker is still missing, look for it in the network "
+                "controller's client list."
+            ),
+        )
+    ]
 
 
 # --- Trueplay ---------------------------------------------------------------
@@ -904,6 +1059,7 @@ def _speaker_to_dict(sp: SpeakerDiagnostics) -> dict:
         "role": sp.role,
         "bond": sp.bond,
         "ip_address": sp.ip_address,
+        "mac_address": sp.mac_address,
         "model_name": sp.model_name,
         "model_number": sp.model_number,
         "software_version": sp.software_version,
@@ -931,4 +1087,14 @@ def _speaker_to_dict(sp: SpeakerDiagnostics) -> dict:
         "br0_rx_dropped": sp.br0.rx_dropped,
         "phy_errors": sp.phy_errors,
         "phy_errors_per_sec": _round_rate(sp.phy_error_rate),
+        "phy_errors_per_sec_samples": [_round_rate(r) for r in sp.phy_error_rates],
+        "wifi_enabled": sp.wifi_enabled,
+        "stp_enabled": sp.stp_enabled,
+        "stp_is_root": sp.stp_is_root,
+        "stp_ports": [{"port": port, "state": state} for port, state in sp.stp_ports],
+        "eth0_rx_packets": sp.eth0.rx_packets,
+        "eth0_rx_errors": sp.eth0.rx_errors,
+        "eth0_tx_packets": sp.eth0.tx_packets,
+        "eth0_tx_errors": sp.eth0.tx_errors,
+        "hal_reset_failures": sp.hal_reset_failures,
     }

@@ -43,7 +43,7 @@ def main(argv: list[str] | None = None) -> int:
         type=float,
         default=5.0,
         metavar="SECONDS",
-        help="Window for measuring Wi-Fi PHY error rates; 0 to skip (default: 5)",
+        help="Length of each of the 3 windows used to measure Wi-Fi PHY error rates; 0 to skip (default: 5)",
     )
     parser.add_argument(
         "--json",

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import statistics
 import time
 from concurrent.futures import ThreadPoolExecutor
 
@@ -23,6 +24,8 @@ from sonos_analyzer.parse import (
 
 
 MAX_WORKERS = 12
+# The PHY error rate is measured over this many back-to-back windows of --phy-sample seconds.
+PHY_WINDOWS = 3
 PHY_ERRORS_RE = re.compile(r"PHY errors since last reading/reset:\s*(\d+)")
 
 
@@ -110,8 +113,16 @@ def _sample_phy_error_rates(snapshot: HouseholdSnapshot, pool: ThreadPoolExecuto
         return (time.monotonic(), int(match.group(1))) if match else None
 
     ips = [ip for ip, sp in snapshot.speakers.items() if sp.phy_errors is not None]
-    baseline = list(pool.map(read, ips))
-    time.sleep(seconds)
-    for ip, first, second in zip(ips, baseline, pool.map(read, ips)):
-        if first and second and second[0] > first[0]:
-            snapshot.speakers[ip].phy_error_rate = second[1] / (second[0] - first[0])
+    previous = list(pool.map(read, ips))
+    # Several windows, so one burst (a microwave, a neighbour) is not reported as a problem.
+    for _ in range(PHY_WINDOWS):
+        time.sleep(seconds)
+        current = list(pool.map(read, ips))
+        for ip, first, second in zip(ips, previous, current):
+            if first and second and second[0] > first[0]:
+                snapshot.speakers[ip].phy_error_rates.append(second[1] / (second[0] - first[0]))
+        previous = current
+    for ip in ips:
+        rates = snapshot.speakers[ip].phy_error_rates
+        if rates:
+            snapshot.speakers[ip].phy_error_rate = statistics.median(rates)

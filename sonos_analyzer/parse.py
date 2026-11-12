@@ -72,6 +72,8 @@ class SpeakerDiagnostics:
     radio_peers: list[tuple[str, int, int, str]] = field(default_factory=list)
     # PHY errors per second, sampled over a short window by the collector
     phy_error_rate: float | None = None
+    # One rate per sample window; a radio is only flagged if it stays high in all of them
+    phy_error_rates: list[float] = field(default_factory=list)
 
 
 @dataclass
@@ -225,7 +227,10 @@ def merge_speakers(*maps: dict[str, SpeakerDiagnostics]) -> dict[str, SpeakerDia
                 current = getattr(existing, key)
                 if isinstance(current, IfconfigStats):
                     continue
-                if current in ("", 0, False, None, []) and value not in ("", 0, False, None, []):
+                if current is None and value is not None:
+                    # Tri-state fields (wifi_enabled, stp_enabled...): keep an explicit False.
+                    setattr(existing, key, value)
+                elif current in ("", 0, False, None, []) and value not in ("", 0, False, None, []):
                     setattr(existing, key, value)
     return merged
 
@@ -284,13 +289,15 @@ def _parse_ifconfig(text: str, speaker: SpeakerDiagnostics) -> None:
     current = None
     for line in text.splitlines():
         line = line.rstrip()
-        if line.startswith("br0 "):
-            current = speaker.br0
-        elif line.startswith("eth0 "):
-            current = speaker.eth0
-        elif current is None:
+        if line and not line[0].isspace():
+            # Every interface block starts in column 0. Keep only br0 and eth0, so a
+            # later block (lo, ath0, wlan0...) cannot overwrite their counters.
+            name = line.split()[0].rstrip(":")
+            current = {"br0": speaker.br0, "eth0": speaker.eth0}.get(name)
             continue
-        elif "RX packets:" in line:
+        if current is None:
+            continue
+        if "RX packets:" in line:
             m = re.search(
                 r"RX packets:(\d+) errors:(\d+) dropped:(\d+)",
                 line,
