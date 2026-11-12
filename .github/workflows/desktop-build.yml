@@ -34,11 +34,11 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ env.TAG }}
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
@@ -78,10 +78,12 @@ jobs:
             curl -sf http://127.0.0.1:8400/api/app && break
             sleep 1
           done
-          curl -sf http://127.0.0.1:8400/ | grep -q "Sonos Analyzer"
+          # Not piped into grep -q: grep exits early, curl then fails writing (exit 23).
+          page=$(curl -sf http://127.0.0.1:8400/)
+          grep -q "Sonos Analyzer" <<< "$page"
           curl -sf -X POST -H "Content-Type: application/json" -d "{}" http://127.0.0.1:8400/api/quit
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.label }}
           path: out/*
@@ -90,7 +92,7 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: out
           merge-multiple: true
