@@ -2,6 +2,38 @@
 
 All notable changes to this fork of [soinkleined/sonos-analyzer](https://github.com/soinkleined/sonos-analyzer). The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased] - Sage Solutions fork
+
+Fewer false positives in multi-access-point homes, and data to cross-check findings against the network controller.
+
+### Fixed
+
+- Ethernet and bridge counters could be overwritten by a later interface block (lo, ath0) in `ifconfig` output, corrupting the interface-error and RX-drop findings.
+- `WifiEnabled="0"` from zone topology was lost when sources were merged.
+- "Wi-Fi radio still on for wired speaker" no longer advises disabling Wi-Fi on a wired soundbar, Amp or pair member that other speakers connect through, or when any speaker's connection is unidentified. It now recommends the system-wide SonosNet switch first.
+- A stereo pair with a wired Sub, or a wired speaker with its partner on SonosNet, is no longer reported as "mixed wired + wireless" (now medium, not high). A pair whose paths are unknown is no longer reported as consistent.
+- The surround-link overlap check ignores the soundbar's own Wi-Fi channel.
+- A speaker that did not report a firmware version is no longer counted as behind or mismatched.
+- A lone wired speaker running spanning tree, with no wireless SonosNet member, is no longer reported as a SonosNet mesh; Wi-Fi-only models (Era, Move, Roam, Arc Ultra, Sub 4, Sonos Play) are not counted as "mixing" SonosNet and Wi-Fi.
+- Speakers whose connection could not be identified are no longer treated as home Wi-Fi.
+
+### Changed
+
+- Every finding carries a `confidence` (high, medium, low), shown in the terminal, HTML and web reports.
+- PHY error rates are measured over three windows and compared only within the same band; a radio is flagged only if it stays high in every window. Now low severity, low confidence.
+- Noise floor limits are per band (2.4 GHz -80 dBm, 5 GHz -85 dBm); low severity, low confidence.
+- Interface errors count only the Ethernet port of wired speakers, and need at least 100,000 packets.
+- Ethernet speed is parsed rather than pattern-matched; 100 Mbps full duplex is normal.
+- "Speakers on 2.4 GHz", "soundbar is on Wi-Fi" and "bridge RX drop ratio" are now info.
+
+### Added
+
+- A finding when speakers could not be read; "No significant issues detected" is no longer printed when the scan was incomplete.
+- A finding when two or more wired speakers run spanning tree (the loop risk with managed switches).
+- JSON per speaker: `mac_address`, `wifi_enabled`, STP state and ports, Ethernet packet and error counters, `hal_reset_failures` and each PHY sample, for matching speakers to the network controller's client list and diffing scans.
+- `tools/sonos_table.py`: a CSV working table from a report, and a diff of two reports (gone, new, changed speakers; counter changes between scans; findings cleared, appeared or persisting).
+- `tests/`: regression tests for the cases above (`python -m unittest discover -s tests`).
+
 ## [0.4.0-beta.1] - 2026-11-12
 
 Pilot pre-release of the desktop app.

@@ -59,7 +59,8 @@ def print_terminal(report: AnalysisReport) -> None:
     print("Findings")
     print("-" * 72)
     for finding in report.findings:
-        print(f"[{SEVERITY_LABEL.get(finding.severity, finding.severity.upper())}] {finding.title}")
+        confidence = f" ({finding.confidence} confidence)" if finding.confidence != "high" else ""
+        print(f"[{SEVERITY_LABEL.get(finding.severity, finding.severity.upper())}] {finding.title}{confidence}")
         print(f"  {finding.detail}")
         for item in finding.affected:
             note = f": {item['note']}" if item["note"] else ""
@@ -235,6 +236,8 @@ def _html_finding(finding: Finding) -> str:
     return (
         f'<div class="finding {escape(finding.severity)}">'
         f"<h3>{escape(finding.title)}</h3>"
-        f"<p>{escape(finding.detail)}</p>"
+        + (f'<p class="muted">{escape(finding.confidence)} confidence - confirm before acting</p>'
+           if finding.confidence != "high" else "")
+        + f"<p>{escape(finding.detail)}</p>"
         f"{f'<ul>{items}</ul>' if items else ''}</div>"
     )

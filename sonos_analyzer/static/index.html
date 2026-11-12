@@ -416,7 +416,7 @@
     const counts = Object.fromEntries(SEVERITIES.map((s) => [s, 0]));
     for (const f of report.findings) counts[f.severity] = (counts[f.severity] || 0) + 1;
     const noisy = new Set(report.findings
-      .filter((f) => f.category === "wireless" && f.severity === "medium")
+      .filter((f) => f.category === "wireless" && /noisy|noise floor/i.test(f.title))
       .flatMap((f) => f.affected_ips));
 
     $("generated").textContent = `Scanned ${new Date(report.generated_at).toLocaleString()}`;
@@ -481,6 +481,9 @@
         el("div", { className: "head" }, [
           el("span", { className: `badge ${sev}`, textContent: sev.toUpperCase() }),
           el("h3", { textContent: f.title }),
+          ...(f.confidence && f.confidence !== "high"
+            ? [el("span", { className: "sub", textContent: `${f.confidence} confidence - confirm before acting` })]
+            : []),
         ]),
         el("p", { textContent: f.detail }),
       ]);
