@@ -12,7 +12,8 @@ Pick the setup that matches what you have:
 
 | You have | Do this | Time |
 |---|---|---|
-| **A Windows or Mac laptop** | Install Docker Desktop, then run one command. See **[Run on a laptop with Docker Desktop](docs/docker-desktop.md)** for the easy route (ready-built image) or the inspect-the-code route (build it yourself). | About 15 minutes, mostly installing Docker Desktop |
+| **A Windows or Mac laptop, nothing installed** (pilot) | Download the ready-made desktop app, open it, and it opens in your browser. Discovery works. Prefer code you can inspect? The same page shows how to run the identical app from source with Python. See **[Desktop app for Windows and Mac](docs/desktop-app.md)**. | About 5 minutes |
+| **A Windows or Mac laptop with Docker Desktop** | Install Docker Desktop, then run one command. See **[Run on a laptop with Docker Desktop](docs/docker-desktop.md)** for the easy route (ready-built image) or the inspect-the-code route (build it yourself). | About 15 minutes, mostly installing Docker Desktop |
 | **A Linux server, NAS or Raspberry Pi** on the speakers' network | Follow [Quick start with Docker](#quick-start-with-docker) below. Speakers are discovered automatically. | About 5 minutes |
 | **Python 3.10+** and no Docker | Follow [Install with Python](#install-with-python). | About 2 minutes |
 

@@ -1,6 +1,6 @@
 # Run Sonos Analyzer on a laptop with Docker Desktop
 
-This guide is for running Sonos Analyzer on a Windows or Mac laptop, without a server. The analyzer only reads diagnostics from the speakers. It never changes a Sonos setting, and it needs no Sonos account.
+This guide is for running Sonos Analyzer on a Windows or Mac laptop, without a server. (There is also a pilot [desktop app](desktop-app.md) that needs no Docker at all, as a ready-made download or [run from inspectable source with Python](desktop-app.md#run-from-source-with-python).) The analyzer only reads diagnostics from the speakers. It never changes a Sonos setting, and it needs no Sonos account.
 
 There are two ways to run it. Both end up with the same page at `http://localhost:8400`:
 

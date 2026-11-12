@@ -2,6 +2,19 @@
 
 All notable changes to this fork of [soinkleined/sonos-analyzer](https://github.com/soinkleined/sonos-analyzer). The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/).
 
+## [0.4.0-beta.1] - 2026-11-12
+
+Pilot pre-release of the desktop app.
+
+### Added
+
+- Desktop app for Windows and macOS (Apple silicon and Intel), built by GitHub Actions and attached to each release. Opens the analyzer in the browser, with discovery working; unsigned for the pilot. The guide also shows how to run the identical app from inspectable source with Python. See [Desktop app for Windows and Mac](docs/desktop-app.md).
+- `sonos-analyzer-app` / `python -m sonos_analyzer.app`: serves the UI on this computer, opens the browser, and stops on **Quit** or after 15 minutes with no page open.
+
+### Changed
+
+- Pre-release tags no longer update the `latest` Docker image.
+
 ## [0.3.0] - 2026-11-12
 
 ### Added
@@ -46,6 +59,7 @@ All notable changes to this fork of [soinkleined/sonos-analyzer](https://github.
 
 Original command-line analyzer by David Klein ([soinkleined/sonos-analyzer](https://github.com/soinkleined/sonos-analyzer)).
 
+[0.4.0-beta.1]: https://github.com/grahamfairbank/sonos-analyzer/compare/v0.3.0...v0.4.0-beta.1
 [0.3.0]: https://github.com/grahamfairbank/sonos-analyzer/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/grahamfairbank/sonos-analyzer/compare/56892df...4530d00
 [0.1.0]: https://github.com/soinkleined/sonos-analyzer/commit/56892df

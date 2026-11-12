@@ -160,6 +160,7 @@
 <body>
 <main>
   <header>
+    <button id="quit-button" class="button secondary" type="button" style="float: right" hidden>Quit Sonos Analyzer</button>
     <h1>Sonos Analyzer</h1>
     <p class="muted">Firmware, Wi-Fi, wiring and bonded-room health for the Sonos speakers on this network. Read-only; nothing on your speakers is changed.</p>
   </header>
@@ -546,6 +547,20 @@
 
   // Show the most recent scan after a reload.
   fetch("/api/report").then((r) => (r.ok ? r.json() : null)).then((r) => r && render(r)).catch(() => {});
+
+  // Desktop app only: a Quit button, and a heartbeat so the app can tell the page is still open.
+  fetch("/api/app").then((r) => r.json()).then(({ app }) => {
+    if (!app) return;
+    $("quit-button").hidden = false;
+    setInterval(() => fetch("/healthz").catch(() => {}), 60000);
+    $("quit-button").addEventListener("click", async () => {
+      await fetch("/api/quit", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }).catch(() => {});
+      document.querySelector("main").replaceChildren(el("header", {}, [
+        el("h1", { textContent: "Sonos Analyzer has stopped" }),
+        el("p", { className: "muted", textContent: "You can close this tab. Open the app again to run another scan." }),
+      ]));
+    });
+  }).catch(() => {});
 </script>
 </body>
 </html>

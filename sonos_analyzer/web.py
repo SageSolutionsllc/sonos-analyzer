@@ -8,6 +8,7 @@ import json
 import os
 import signal
 import threading
+import time
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
@@ -27,6 +28,11 @@ DISCOVERY_INTERFACE = os.environ.get("SONOS_ANALYZER_INTERFACE") or None
 
 _scan_lock = threading.Lock()
 _last_report: AnalysisReport | None = None
+
+# Set by the desktop app (sonos_analyzer.app): adds a Quit button to the page.
+APP_MODE = False
+on_quit = None
+last_activity = time.monotonic()
 
 
 class ScanError(Exception):
@@ -103,10 +109,14 @@ class Handler(BaseHTTPRequestHandler):
     server_version = f"sonos-analyzer/{__version__}"
 
     def do_GET(self) -> None:  # noqa: N802 - http.server naming
+        global last_activity
+        last_activity = time.monotonic()
         path = self.path.split("?", 1)[0]
         if path in ("/", "/index.html"):
             page = resources.files("sonos_analyzer").joinpath("static/index.html").read_bytes()
             self._send(HTTPStatus.OK, page, "text/html; charset=utf-8")
+        elif path == "/api/app":
+            self._send_json(HTTPStatus.OK, {"app": APP_MODE, "version": __version__})
         elif path == "/healthz":
             self._send_json(HTTPStatus.OK, {"status": "ok", "version": __version__})
         elif path == "/api/report":
@@ -128,7 +138,18 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(HTTPStatus.NOT_FOUND, {"error": "Not found"})
 
     def do_POST(self) -> None:  # noqa: N802 - http.server naming
-        if self.path.split("?", 1)[0] != "/api/analyze":
+        global last_activity
+        last_activity = time.monotonic()
+        path = self.path.split("?", 1)[0]
+        if path == "/api/quit" and APP_MODE and on_quit:
+            # JSON only, like /api/analyze, so other sites cannot stop the app.
+            if self.headers.get_content_type() != "application/json":
+                self._send_json(HTTPStatus.UNSUPPORTED_MEDIA_TYPE, {"error": "Content-Type must be application/json"})
+                return
+            self._send_json(HTTPStatus.OK, {"stopping": True})
+            threading.Thread(target=on_quit, daemon=True).start()
+            return
+        if path != "/api/analyze":
             self._send_json(HTTPStatus.NOT_FOUND, {"error": "Not found"})
             return
 
@@ -164,6 +185,11 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         self._send_json(HTTPStatus.OK, report_payload(report))
+
+    def log_message(self, format: str, *args) -> None:  # noqa: A002 - http.server signature
+        # The desktop app has no console on macOS, and a request log is noise for its users.
+        if not APP_MODE:
+            super().log_message(format, *args)
 
     def _send_json(self, status: HTTPStatus, payload: dict) -> None:
         self._send(status, json.dumps(payload).encode("utf-8"), "application/json")

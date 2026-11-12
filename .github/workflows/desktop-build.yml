@@ -1,0 +1,100 @@
+# Builds the desktop app for Windows and macOS (Apple silicon and Intel) and
+# attaches it to the GitHub release. Builds are unsigned (pilot).
+name: Build desktop app
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to attach the builds to
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  TAG: ${{ github.event.release.tag_name || inputs.tag }}
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            label: windows-x64
+          - os: macos-latest
+            label: macos-apple-silicon
+          - os: macos-15-intel
+            label: macos-intel
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install pyinstaller
+
+      - name: Build (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          pyinstaller --noconfirm --onefile --console --name SonosAnalyzer \
+            --paths . --add-data "sonos_analyzer/static:sonos_analyzer/static" packaging/launcher.py
+          mkdir out
+          cp dist/SonosAnalyzer.exe "out/SonosAnalyzer-${TAG#v}-${{ matrix.label }}.exe"
+          echo "BIN=dist/SonosAnalyzer.exe" >> "$GITHUB_ENV"
+
+      - name: Build (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          pyinstaller --noconfirm --windowed --name "Sonos Analyzer" \
+            --osx-bundle-identifier dev.grahamfairbank.sonos-analyzer \
+            --paths . --add-data "sonos_analyzer/static:sonos_analyzer/static" packaging/launcher.py
+          APP="dist/Sonos Analyzer.app"
+          PLIST="$APP/Contents/Info.plist"
+          # Ask for Local Network access (macOS 15+), and run without a Dock icon.
+          plutil -insert NSLocalNetworkUsageDescription -string \
+            "Sonos Analyzer reads diagnostics from the Sonos speakers on your network." "$PLIST"
+          plutil -insert LSUIElement -bool true "$PLIST"
+          plutil -replace CFBundleShortVersionString -string "${TAG#v}" "$PLIST"
+          codesign --force --deep --sign - "$APP"
+          mkdir out
+          ditto -c -k --keepParent "$APP" "out/SonosAnalyzer-${TAG#v}-${{ matrix.label }}.zip"
+          echo "BIN=$APP/Contents/MacOS/Sonos Analyzer" >> "$GITHUB_ENV"
+
+      - name: Smoke test
+        run: |
+          "$BIN" --no-browser --port 8400 --idle-timeout 0 &
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:8400/api/app && break
+            sleep 1
+          done
+          curl -sf http://127.0.0.1:8400/ | grep -q "Sonos Analyzer"
+          curl -sf -X POST -H "Content-Type: application/json" -d "{}" http://127.0.0.1:8400/api/quit
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.label }}
+          path: out/*
+
+  attach:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: out
+          merge-multiple: true
+      - name: Attach to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "$TAG" out/* --clobber --repo "${{ github.repository }}"

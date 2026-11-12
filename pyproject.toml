@@ -34,6 +34,7 @@ Issues = "https://github.com/grahamfairbank/sonos-analyzer/issues"
 [project.scripts]
 sonos-analyzer = "sonos_analyzer.cli:main"
 sonos-analyzer-web = "sonos_analyzer.web:main"
+sonos-analyzer-app = "sonos_analyzer.app:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
